@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en" class="dark h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AURA-Civic | Real-Time Civic Intelligence & Spatial Anomaly Engine</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // ==========================================
+    // GOOGLE MAPS EMBED API KEY CONFIGURATION
+    // ==========================================
+    // Replace 'YOUR_GOOGLE_MAPS_API_KEY' with your actual Google Maps API key
+    let GOOGLE_MAPS_API_KEY = "YOUR_GOOGLE_MAPS_API_KEY";
+
+    /**
+     * Generates a Google Maps Embed iframe URL using the configured API Key.
+     * Falls back to standard embed if no key is supplied.
+     * @param {string} locationQuery - Location query, address, or landmark.
+     * @param {string} mode - Embed mode: 'place', 'search', 'directions', or 'view'.
+     * @returns {string} Fully qualified iframe src URL.
+     */
+    function getGoogleMapsEmbedUrl(locationQuery, mode = 'place') {
+      const encodedQuery = encodeURIComponent(locationQuery);
+      
+      // Use official Google Maps Embed API v1 when a key is available
+      if (GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== "YOUR_GOOGLE_MAPS_API_KEY") {
+        return `https://www.google.com/maps/embed/v1/${mode}?key=${GOOGLE_MAPS_API_KEY}&q=${encodedQuery}`;
+      }
+      
+      // Fallback preview URL when API Key is pending
+      return `https://maps.google.com/maps?q=${encodedQuery}&t=&z=13&ie=UTF8&iwloc=&output=embed`;
+    }
+
+    /**
+     * Updates the Google Maps API Key dynamically from UI controls or input
+     * @param {string} newApiKey - The Google Maps API key string
+     */
+    function setGoogleMapsApiKey(newApiKey) {
+      if (newApiKey && newApiKey.trim() !== '') {
+        GOOGLE_MAPS_API_KEY = newApiKey.trim();
+        localStorage.setItem('google_maps_api_key', GOOGLE_MAPS_API_KEY);
+        
+        // Refresh active map elements on the page
+        document.querySelectorAll('iframe[data-map-location]').forEach(iframe => {
+          const location = iframe.getAttribute('data-map-location');
+          iframe.src = getGoogleMapsEmbedUrl(location);
+        });
+      }
+    }
+
+    // Load persisted API key on initialization if previously saved
+    (function initApiKey() {
+      const savedKey = localStorage.getItem('google_maps_api_key');
+      if (savedKey) {
+        GOOGLE_MAPS_API_KEY = savedKey;
+      }
+    })();
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Leaflet GIS Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Chart.js UMD bundle -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+
+  <style>
+    /* Custom Scrollbar & Cyberpunk glassmorphism tweaks */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    ::-webkit-scrollbar-thumb { background: rgba(0, 242, 254, 0.25); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(0, 242, 254, 0.5); }
+
+    .glass-card {
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    
+    .glass-card-glow {
+      box-shadow: 0 0 20px rgba(0, 242, 254, 0.05);
+    }
+
+    .pulse-glow-critical {
+      animation: pulseCritical 1.8s infinite;
+    }
+    @keyframes pulseCritical {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(247, 37, 133, 0.7); }
+      50% { box-shadow: 0 0 15px 4px rgba(247, 37, 133, 0.4); }
+    }
+
+    .pulse-glow-caution {
+      animation: pulseCaution 2s infinite;
+    }
+    @keyframes pulseCaution {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 183, 3, 0.6); }
+      50% { box-shadow: 0 0 12px 3px rgba(255, 183, 3, 0.3); }
+    }
+
+    /* Leaflet Dark Theme Adjustments */
+    .leaflet-container {
+      background: #090d16 !important;
+      font-family: 'Inter', sans-serif !important;
+    }
+    .leaflet-tile-pane { filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3); }
+    .leaflet-control-zoom a {
+      background-color: rgba(15, 23, 42, 0.9) !important;
+      color: #00f2fe !important;
+      border-color: rgba(255, 255, 255, 0.1) !important;
+    }
+
+    /* Hex Polygon animations */
+    .hex-poly {
+      transition: all 0.4s ease;
+      cursor: pointer;
+    }
+    .hex-poly:hover {
+      fill-opacity: 0.85 !important;
+      stroke-width: 3px !important;
+      filter: drop-shadow(0 0 8px rgba(0,242,254,0.8));
+    }
+  </style>
+</head>
+
+<body class="h-full flex flex-col font-sans bg-[#090d16] text-slate-100 overflow-hidden select-none">
+
+  <header class="h-16 border-b border-white/10 bg-slate-900/80 backdrop-blur-md px-4 flex items-center justify-between shrink-0 z-30">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-teal via-brand-emerald to-brand-violet p-0.5 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+        <div class="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
+          <i class="fa-solid fa-city text-brand-teal text-lg"></i>
+        </div>
+      </div>
+      <div>
+        <div class="flex items-center space-x-2">
+          <span class="font-bold tracking-wider text-base bg-clip-text text-transparent bg-gradient-to-r from-brand-teal via-teal-200 to-brand-emerald">
+            AURA-CIVIC
+          </span>
+          <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-brand-teal/10 text-brand-teal border border-brand-teal/30">v3.4-PRO</span>
+        </div>
+        <p class="text-[11px] text-slate-400 font-mono tracking-tight">Real-Time Spatial Fusion & Anomaly Intelligence</p>
+      </div>
+    </div>
+
+    <!-- Live Simulation Controls -->
+    <div class="flex items-center space-x-3 bg-slate-950/80 p-1.5 rounded-xl border border-white/10">
+      <button id="btn-toggle-sim" onclick="toggleSimulation()" class="px-3 py-1.5 rounded-lg bg-brand-teal/20 hover:bg-brand-teal/30 text-brand-teal border border-brand-teal/40 text-xs font-semibold flex items-center space-x-2 transition">
+        <i id="sim-play-icon" class="fa-solid fa-pause"></i>
+        <span id="sim-play-text">PAUSE SIM</span>
+      </button>
+
+      <div class="flex items-center space-x-1 border-l border-white/10 pl-2">
+        <span class="text-[11px] font-mono text-slate-400 mr-1">SPEED:</span>
+        <button onclick="setSimSpeed(1)" id="speed-1x" class="px-2 py-1 rounded text-xs font-mono bg-brand-teal/20 text-brand-teal border border-brand-teal/40">1x</button>
+        <button onclick="setSimSpeed(2)" id="speed-2x" class="px-2 py-1 rounded text-xs font-mono text-slate-400 hover:text-slate-200">2x</button>
+        <button onclick="setSimSpeed(5)" id="speed-5x" class="px-2 py-1 rounded text-xs font-mono text-slate-400 hover:text-slate-200">5x</button>
+      </div>
+
+      <!-- Incident Presets Trigger -->
+      <div class="relative border-l border-white/10 pl-2">
+        <select id="preset-scenario-select" onchange="injectScenario(this.value)" class="bg-slate-900 text-xs font-mono text-brand-teal border border-brand-teal/30 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-teal">
+          <option value="" disabled selected>⚡ Inject Scenario Preset...</option>
+          <option value="water_main">💧 Water Main Break & Traffic Spike</option>
+          <option value="extreme_heat">🔥 Extreme Heatwave & Grid Strain</option>
+          <option value="noise_transit">🔊 Concert Noise & Transit Bottleneck</option>
+          <option value="air_quality">🏭 Industrial Emission & AQI Spike</option>
+          <option value="reset">🔄 Reset All Streams to Baseline</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Status Indicator & Settings Modal Toggle -->
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-2 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-white/5">
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+        </span>
+        <span class="text-xs font-mono text-slate-300">STREAM: <span class="text-brand-emerald font-semibold" id="clock-display">00:00:00</span></span>
+      </div>
+
+      <button onclick="openConfigModal()" class="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center border border-white/10 transition relative">
+        <i class="fa-solid fa-sliders"></i>
+        <span id="api-key-indicator" class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="flex flex-1 h-[calc(100vh-4rem)] overflow-hidden">
+    
+    <!-- Sidebar Navigation -->
+    <aside class="w-16 border-r border-white/10 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-4 space-y-5 shrink-0 z-20">
+      <button onclick="switchView('overview')" id="nav-overview" title="Dashboard Overview" class="nav-btn w-10 h-10 rounded-xl flex items-center justify-center text-brand-teal bg-brand-teal/15 border border-brand-teal/30 transition">
+        <i class="fa-solid fa-chart-pie"></i>
+      </button>
+      <button onclick="switchView('spatial')" id="nav-spatial" title="Spatial Anomaly Heatmap" class="nav-btn w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-slate-800 border border-transparent transition">
+        <i class="fa-solid fa-map-location-dot"></i>
+      </button>
+      <button onclick="switchView('correlation')" id="nav-correlation" title="Cross-Stream Correlation" class="nav-btn w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-slate-800 border border-transparent transition">
+        <i class="fa-solid fa-network-wired"></i>
+      </button>
+      <button onclick="switchView('narrative')" id="nav-narrative" title="AI Neighborhood Summarizer" class="nav-btn w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-slate-800 border border-transparent transition">
+        <i class="fa-solid fa-brain"></i>
+      </button>
+      <button onclick="switchView('inspector')" id="nav-inspector" title="Live Stream Inspector" class="nav-btn w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-slate-800 border border-transparent transition">
+        <i class="fa-solid fa-list-check"></i>
+      </button>
+      
+      <div class="mt-auto flex flex-col items-center space-y-3">
+        <button onclick="exportReport('pdf')" title="Export Summary PDF" class="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs transition">
+          <i class="fa-solid fa-file-pdf text-red-400"></i>
+        </button>
+        <button onclick="exportReport('json')" title="Export Raw Stream JSON" class="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs transition">
+          <i class="fa-solid fa-file-code text-brand-teal"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Workspace Content Area -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-[#090d16] relative">
+      
+      <!-- VIEW 1: MAIN DASHBOARD OVERVIEW -->
+      <div id="view-overview" class="view-panel h-full flex flex-col p-4 space-y-4 overflow-y-auto">
+        
+        <!-- Top Row Cards: Selected District Quick Metrics -->
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-3 shrink-0">
+          
+          <!-- District Selector Header Card -->
+          <div class="glass-card rounded-2xl p-3.5 flex flex-col justify-between border-brand-teal/20 bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-slate-950">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-mono text-slate-400 uppercase tracking-wider">SELECTED TARGET</span>
+              <span id="district-status-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                STABLE
+              </span>
+            </div>
+            <div>
+              <select id="district-selector" onchange="changeSelectedDistrict(this.value)" class="w-full bg-slate-950 text-base font-bold text-slate-100 border border-white/10 rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-brand-teal cursor-pointer">
+                <!-- Dynamically populated -->
+              </select>
+              <div class="text-[11px] text-slate-400 font-mono mt-1 flex justify-between">
+                <span>H3 Res-8 Hexagon</span>
+                <span id="h3-index-display" class="text-brand-teal">#882a100d2bffff</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Metric 1: 311 Surge Rate -->
+          <div class="glass-card rounded-2xl p-3.5 flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+              <div>
+                <span class="text-[10px] font-mono text-slate-400 uppercase">311 COMPLAINT RATE</span>
+                <h4 id="metric-311-val" class="text-xl font-bold font-mono text-slate-100">12 <span class="text-xs text-slate-400 font-normal">req/hr</span></h4>
+              </div>
+              <div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center text-brand-teal">
+                <i class="fa-solid fa-phone-volume"></i>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-[11px] font-mono mt-2">
+              <span class="text-slate-400">Baseline: 10</span>
+              <span id="metric-311-zscore" class="text-brand-emerald">Z: +0.4</span>
+            </div>
+          </div>
+
+          <!-- Metric 2: Traffic Speed Index -->
+          <div class="glass-card rounded-2xl p-3.5 flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+              <div>
+                <span class="text-[10px] font-mono text-slate-400 uppercase">AVG TRAFFIC SPEED</span>
+                <h4 id="metric-traffic-val" class="text-xl font-bold font-mono text-slate-100">32 <span class="text-xs text-slate-400 font-normal">mph</span></h4>
+              </div>
+              <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-brand-amber">
+                <i class="fa-solid fa-car-side"></i>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-[11px] font-mono mt-2">
+              <span class="text-slate-400">Baseline: 30 mph</span>
+              <span id="metric-traffic-zscore" class="text-brand-emerald">Z: +0.2</span>
+            </div>
+          </div>
+
+          <!-- Metric 3: Air Quality AQI -->
+          <div class="glass-card rounded-2xl p-3.5 flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+              <div>
+                <span class="text-[10px] font-mono text-slate-400 uppercase">AIR QUALITY (AQI)</span>
+                <h4 id="metric-aqi-val" class="text-xl font-bold font-mono text-slate-100">42 <span class="text-xs text-slate-400 font-normal">AQI</span></h4>
+              </div>
+              <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-brand-emerald">
+                <i class="fa-solid fa-wind"></i>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-[11px] font-mono mt-2">
+              <span class="text-slate-400">Baseline: 35</span>
+              <span id="metric-aqi-zscore" class="text-brand-emerald">Z: +0.5</span>
+            </div>
+          </div>
+
+          <!-- Metric 4: Multi-Stream Isolation Anomaly Index -->
+          <div class="glass-card rounded-2xl p-3.5 flex flex-col justify-between border-brand-teal/30 bg-slate-900/90">
+            <div class="flex justify-between items-start">
+              <div>
+                <span class="text-[10px] font-mono text-slate-400 uppercase">FUSED ISOLATION SCORE</span>
+                <h4 id="metric-iso-score" class="text-xl font-bold font-mono text-brand-teal">0.12</h4>
+              </div>
+              <div class="w-8 h-8 rounded-lg bg-brand-teal/15 flex items-center justify-center text-brand-teal">
+                <i class="fa-solid fa-shield-halved"></i>
+              </div>
+            </div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div id="metric-iso-bar" class="bg-gradient-to-r from-brand-emerald via-brand-amber to-brand-magenta h-full transition-all duration-500" style="width: 12%"></div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Middle Section: Leaflet GIS Map + Real-Time Telemetry Graph -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-[380px]">
+          
+          <!-- Interactive Geo Spatial Map -->
+          <div class="lg:col-span-7 glass-card rounded-2xl p-3 flex flex-col relative overflow-hidden">
+            <div class="flex items-center justify-between mb-2 px-1 z-10">
+              <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-layer-group text-brand-teal text-sm"></i>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">Municipal Hexagonal Anomaly Mesh</h3>
+                <select id="map-layer-select" onchange="changeMapLayer(this.value)" class="ml-2 bg-slate-950 text-[10px] font-mono text-brand-teal border border-brand-teal/30 rounded-lg px-2 py-0.5 focus:outline-none">
+                  <option value="carto-dark">Carto Dark (Default)</option>
+                  <option value="gmaps-roadmap">Google Maps (Roadmap)</option>
+                  <option value="gmaps-satellite">Google Maps (Satellite)</option>
+                  <option value="gmaps-hybrid">Google Maps (Hybrid)</option>
+                  <option value="gmaps-terrain">Google Maps (Terrain)</option>
+                </select>
+              </div>
+              <div class="flex items-center space-x-3 text-[10px] font-mono">
+                <span class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 mr-1.5"></span>Normal</span>
+                <span class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 mr-1.5"></span>Caution</span>
+                <span class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 mr-1.5"></span>Critical</span>
+              </div>
+            </div>
+            
+            <div id="spatial-map" class="w-full h-full rounded-xl z-0 border border-white/5"></div>
+
+            <!-- Floating Quick Summary Tooltip -->
+            <div class="absolute bottom-5 left-5 bg-slate-900/90 backdrop-blur-md p-3 rounded-xl border border-white/10 z-10 max-w-xs text-xs space-y-1 shadow-2xl">
+              <div class="text-[10px] font-mono text-brand-teal flex justify-between">
+                <span>ACTIVE SCENARIO:</span>
+                <span id="map-active-scenario" class="font-bold">STANDARD BASELINE</span>
+              </div>
+              <p id="map-quick-desc" class="text-slate-300 text-[11px] leading-tight">
+                All district sensors are operating within expected multi-variable standard deviations.
+              </p>
+            </div>
+          </div>
+
+          <!-- Real-time Telemetry Line Chart -->
+          <div class="lg:col-span-5 glass-card rounded-2xl p-3.5 flex flex-col">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-chart-line text-brand-teal text-sm"></i>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">Dynamic Multi-Stream Telemetry</h3>
+              </div>
+              <select id="chart-stream-select" onchange="updateChartStream(this.value)" class="bg-slate-950 text-xs font-mono text-brand-teal border border-brand-teal/30 rounded-lg px-2 py-1 focus:outline-none">
+                <option value="all">All Combined Streams</option>
+                <option value="311">311 Complaint Volume</option>
+                <option value="traffic">Traffic Speed (mph)</option>
+                <option value="aqi">Air Quality (AQI)</option>
+                <option value="noise">Noise Level (dB)</option>
+                <option value="transit">Transit Delay (min)</option>
+              </select>
+            </div>
+
+            <div class="flex-1 relative w-full h-full min-h-[260px]">
+              <canvas id="telemetryChart"></canvas>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Bottom Section: AI Situation Narrative & Live Anomaly Log -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 h-64 shrink-0">
+          
+          <!-- AI Plain-Language Narrative Card -->
+          <div class="lg:col-span-7 glass-card rounded-2xl p-4 flex flex-col justify-between border-brand-teal/20 relative overflow-hidden bg-gradient-to-r from-slate-900/90 via-slate-900/80 to-slate-950">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center space-x-2">
+                <div class="w-6 h-6 rounded-lg bg-brand-teal/20 flex items-center justify-center text-brand-teal text-xs">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i>
+                </div>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-100">AI Plain-Language Neighborhood Narrative</h3>
+              </div>
+
+              <div class="flex items-center space-x-2">
+                <!-- Speech Synthesis Trigger -->
+                <button onclick="speakNarrative()" id="btn-speak" title="Read Aloud with Voice Synthesis" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center space-x-1.5 border border-white/10 transition">
+                  <i class="fa-solid fa-volume-high text-brand-emerald"></i>
+                  <span class="text-[11px] font-mono">LISTEN</span>
+                </button>
+
+                <!-- Gemini Generate Button -->
+                <button onclick="generateAINarrative()" id="btn-generate-ai" class="px-3 py-1 rounded-lg bg-gradient-to-r from-brand-teal to-brand-emerald hover:opacity-90 text-slate-950 font-bold text-xs flex items-center space-x-2 transition shadow-lg shadow-cyan-500/20">
+                  <i class="fa-solid fa-rotate text-xs"></i>
+                  <span>GENERATE NARRATIVE</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Narrative Content Output -->
+            <div id="narrative-box" class="flex-1 bg-slate-950/60 rounded-xl p-3 border border-white/5 overflow-y-auto text-xs text-slate-300 space-y-2 leading-relaxed">
+              <p class="text-slate-400 italic">
+                Click <strong class="text-brand-teal">"Generate Narrative"</strong> to synthesize real-time municipal telemetry, dynamic z-scores, cross-stream correlations, and active work orders into plain language using Gemini AI.
+              </p>
+            </div>
+
+            <div class="flex items-center justify-between mt-2 pt-2 border-t border-white/5 text-[10px] font-mono text-slate-400">
+              <span id="ai-model-tag">ENGINE: GEMINI 3.1 FLASH / HEURISTIC HYBRID</span>
+              <span id="ai-timestamp">LAST UPDATED: NEVER</span>
+            </div>
+          </div>
+
+          <!-- Live Anomaly Alert Log Feed -->
+          <div class="lg:col-span-5 glass-card rounded-2xl p-4 flex flex-col">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-triangle-exclamation text-brand-amber text-sm"></i>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">Real-Time Anomaly Log</h3>
+              </div>
+              <span id="anomaly-count-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-brand-amber/20 text-brand-amber border border-brand-amber/30">
+                0 ACTIVE ALERTS
+              </span>
+            </div>
+
+            <!-- Alert Scroll Area -->
+            <div id="anomaly-log-list" class="flex-1 overflow-y-auto space-y-2 pr-1 font-mono text-xs">
+              <div class="text-slate-500 italic text-center py-6 text-xs">No active critical anomalies detected. System baseline healthy.</div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- VIEW 2: SPATIAL ANOMALY HEATMAP VIEW -->
+      <div id="view-spatial" class="view-panel hidden h-full p-4 flex-col space-y-4 overflow-y-auto">
+        <div class="glass-card rounded-2xl p-4 flex justify-between items-center">
+          <div>
+            <h2 class="text-lg font-bold text-slate-100 flex items-center space-x-2">
+              <i class="fa-solid fa-map-location-dot text-brand-teal"></i>
+              <span>Spatial Anomaly Mesh & District Breakdown</span>
+            </h2>
+            <p class="text-xs text-slate-400">H3 Hexagonal Spatial Index resolution 8 cross-analyzing all municipal stream coordinates.</p>
+          </div>
+          <button onclick="switchView('overview')" class="px-3 py-1.5 rounded-xl bg-slate-800 text-xs font-mono text-slate-300 hover:bg-slate-700">
+            ← Return to Dashboard
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1">
+          <!-- District Detail Cards Grid -->
+          <div id="spatial-districts-grid" class="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Dynamically populated district cards -->
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW 3: CROSS-STREAM CORRELATION MATRIX -->
+      <div id="view-correlation" class="view-panel hidden h-full p-4 flex flex-col space-y-4 overflow-y-auto">
+        <div class="glass-card rounded-2xl p-4 flex justify-between items-center shrink-0">
+          <div>
+            <h2 class="text-lg font-bold text-slate-100 flex items-center space-x-2">
+              <i class="fa-solid fa-network-wired text-brand-teal"></i>
+              <span>Real-Time Cross-Stream Pearson Correlation Matrix</span>
+            </h2>
+            <p class="text-xs text-slate-400">Dynamically computes covariance and correlation coefficients across 15-minute sliding stream windows to isolate hidden systemic relationships.</p>
+          </div>
+          <button onclick="switchView('overview')" class="px-3 py-1.5 rounded-xl bg-slate-800 text-xs font-mono text-slate-300 hover:bg-slate-700">
+            ← Return to Dashboard
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
+          <!-- Correlation Heatmap Matrix Table -->
+          <div class="lg:col-span-7 glass-card rounded-2xl p-4 flex flex-col justify-between">
+            <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider mb-3">Stream Pearson Correlation Coefficient ($r$) Matrix</h3>
+            <div class="overflow-x-auto flex-1 flex items-center justify-center">
+              <table id="correlation-table" class="w-full text-center border-collapse font-mono text-xs">
+                <!-- Dynamically populated -->
+              </table>
+            </div>
+            <div class="flex justify-between items-center text-[11px] font-mono text-slate-400 mt-4 pt-2 border-t border-white/5">
+              <span class="flex items-center space-x-1"><span class="w-3 h-3 bg-cyan-500/30 border border-cyan-400 inline-block rounded"></span> Inverse (-1.0)</span>
+              <span class="flex items-center space-x-1"><span class="w-3 h-3 bg-slate-800 inline-block rounded"></span> Uncorrelated (0.0)</span>
+              <span class="flex items-center space-x-1"><span class="w-3 h-3 bg-rose-500/40 border border-rose-400 inline-block rounded"></span> High Correlation (+1.0)</span>
+            </div>
+          </div>
+
+          <!-- Correlation Insights & Discovered Lead-Lag Cascades -->
+          <div class="lg:col-span-5 glass-card rounded-2xl p-4 flex flex-col space-y-3">
+            <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Top Detected Stream Correlations</h3>
+            <div id="top-correlations-list" class="flex-1 overflow-y-auto space-y-3 text-xs">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW 4: AI NARRATIVE GENERATOR FULL PAGE -->
+      <div id="view-narrative" class="view-panel hidden h-full p-4 flex flex-col space-y-4 overflow-y-auto">
+        <div class="glass-card rounded-2xl p-4 flex justify-between items-center shrink-0">
+          <div>
+            <h2 class="text-lg font-bold text-slate-100 flex items-center space-x-2">
+              <i class="fa-solid fa-brain text-brand-teal"></i>
+              <span>AI Neighborhood Situation Narrative Hub</span>
+            </h2>
+            <p class="text-xs text-slate-400">Structured prompt synthesis combining statistical Z-scores, multi-variable anomaly scores, active work orders, and local weather alerts.</p>
+          </div>
+          <button onclick="switchView('overview')" class="px-3 py-1.5 rounded-xl bg-slate-800 text-xs font-mono text-slate-300 hover:bg-slate-700">
+            ← Return to Dashboard
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
+          <!-- Left: Prompt Context Inspector -->
+          <div class="lg:col-span-5 glass-card rounded-2xl p-4 flex flex-col space-y-3">
+            <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Generated Payload Context</h3>
+            <pre id="narrative-payload-preview" class="flex-1 bg-slate-950 p-3 rounded-xl border border-white/5 font-mono text-[11px] text-brand-teal overflow-y-auto whitespace-pre-wrap">Loading payload context...</pre>
+          </div>
+
+          <!-- Right: Detailed AI Executive Narrative Output -->
+          <div class="lg:col-span-7 glass-card rounded-2xl p-4 flex flex-col space-y-3 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Executive Briefing Output</h3>
+              <div class="flex items-center space-x-2">
+                <button onclick="speakNarrative()" class="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-brand-emerald font-mono flex items-center space-x-2 border border-white/10">
+                  <i class="fa-solid fa-volume-high"></i>
+                  <span>SPEAK BRIEFING</span>
+                </button>
+                <button onclick="generateAINarrative()" class="px-3 py-1 rounded-lg bg-brand-teal text-slate-950 font-bold text-xs flex items-center space-x-2 shadow-lg shadow-cyan-500/20">
+                  <i class="fa-solid fa-bolt"></i>
+                  <span>SYNTHESIZE NOW</span>
+                </button>
+              </div>
+            </div>
+
+            <div id="narrative-full-output" class="flex-1 bg-slate-950/80 rounded-xl p-4 border border-white/5 overflow-y-auto space-y-4 text-xs leading-relaxed text-slate-200 font-sans">
+              <!-- Rendered full report -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW 5: LIVE STREAM INSPECTOR & RAW METRICS -->
+      <div id="view-inspector" class="view-panel hidden h-full p-4 flex flex-col space-y-4 overflow-y-auto">
+        <div class="glass-card rounded-2xl p-4 flex justify-between items-center shrink-0">
+          <div>
+            <h2 class="text-lg font-bold text-slate-100 flex items-center space-x-2">
+              <i class="fa-solid fa-list-check text-brand-teal"></i>
+              <span>Municipal Telemetry Stream Inspector</span>
+            </h2>
+            <p class="text-xs text-slate-400">Raw event stream telemetry for IoT, GTFS transit, 311 complaints, and noise sensors.</p>
+          </div>
+          <button onclick="switchView('overview')" class="px-3 py-1.5 rounded-xl bg-slate-800 text-xs font-mono text-slate-300 hover:bg-slate-700">
+            ← Return to Dashboard
+          </button>
+        </div>
+
+        <div class="glass-card rounded-2xl p-4 flex-1 overflow-x-auto">
+          <table class="w-full text-left border-collapse font-mono text-xs">
+            <thead>
+              <tr class="border-b border-white/10 text-slate-400 text-[11px]">
+                <th class="p-2">TIMESTAMP</th>
+                <th class="p-2">DISTRICT</th>
+                <th class="p-2">STREAM TYPE</th>
+                <th class="p-2">METRIC VALUE</th>
+                <th class="p-2">BASELINE</th>
+                <th class="p-2">Z-SCORE</th>
+                <th class="p-2">STATUS</th>
+              </tr>
+            </thead>
+            <tbody id="stream-inspector-table-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="config-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md hidden items-center justify-center z-50 p-4">
+    <div class="glass-card rounded-2xl max-w-md w-full p-5 space-y-4 border-brand-teal/30 shadow-2xl">
+      <div class="flex justify-between items-center border-b border-white/10 pb-3">
+        <h3 class="text-sm font-bold text-slate-100 flex items-center space-x-2">
+          <i class="fa-solid fa-sliders text-brand-teal"></i>
+          <span>Configuration & System API Keys</span>
+        </h3>
+        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-slate-200">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Google Maps API Key</label>
+          <input type="password" id="gmaps-api-key-input" placeholder="AIzaSy..." class="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-teal">
+          <p class="text-[10px] text-slate-400 mt-1">Unlocks Google Maps vector roadmap, hybrid, and satellite spatial imagery layers.</p>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Google Gemini API Key (Optional)</label>
+          <input type="password" id="gemini-api-key-input" placeholder="AIzaSy..." class="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-teal">
+          <p class="text-[10px] text-slate-400 mt-1">If left empty, the application uses an internal mock synthesis LLM engine that emulates structured Gemini responses.</p>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Target Gemini Model</label>
+          <select id="gemini-model-select" class="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-teal">
+            <option value="gemini-3-flash-preview">gemini-3-flash-preview (Fastest / Recommended)</option>
+            <option value="gemini-1.5-pro">gemini-1.5-pro (High Precision Context)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Anomaly Detection Sensitivity Threshold ($|Z| \ge$)</label>
+          <input type="range" id="sensitivity-slider" min="1.5" max="3.5" step="0.1" value="2.0" oninput="document.getElementById('sensitivity-val').innerText = this.value" class="w-full accent-brand-teal">
+          <div class="flex justify-between text-[10px] font-mono text-slate-400">
+            <span>High Sensitivity (1.5)</span>
+            <span id="sensitivity-val" class="text-brand-teal font-bold">2.0</span>
+            <span>Low Sensitivity (3.5)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-2 border-t border-white/10">
+        <button onclick="closeConfigModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300">Save & Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ==========================================================================
+       1. DATA ARCHITECTURE & STATE MANAGEMENT
+       ========================================================================== */
+
+    // District Master Configuration Data & H3 Spatial Index Geometries
+    const DISTRICTS = {
+      downtown_harbor: {
+        name: "Downtown Harbor District",
+        h3Index: "#882a100d2bffff",
+        coords: [40.7250, -73.9980],
+        polygon: [
+          [40.7300, -74.0040],
+          [40.7320, -73.9920],
+          [40.7260, -73.9860],
+          [40.7180, -73.9920],
+          [40.7180, -74.0040],
+          [40.7240, -74.0100]
+        ],
+        baselines: {
+          complaints311: 12.0,
+          trafficSpeed: 32.0,
+          aqi: 42.0,
+          noise: 55.0,
+          transitDelay: 3.5
+        },
+        activeWorkOrders: ["Pavement Repair #402", "Water Main Maintenance #109"]
+      },
+      financial_district: {
+        name: "Financial & Civic Center",
+        h3Index: "#882a100d2dffff",
+        coords: [40.7128, -74.0060],
+        polygon: [
+          [40.7180, -74.0120],
+          [40.7200, -74.0000],
+          [40.7140, -73.9940],
+          [40.7060, -74.0000],
+          [40.7060, -74.0120],
+          [40.7120, -74.0180]
+        ],
+        baselines: {
+          complaints311: 8.5,
+          trafficSpeed: 24.0,
+          aqi: 48.0,
+          noise: 62.0,
+          transitDelay: 5.0
+        },
+        activeWorkOrders: ["Subway Signal Upgrade #881"]
+      },
+      midtown_center: {
+        name: "Midtown Commercial Hub",
+        h3Index: "#882a100d21ffff",
+        coords: [40.7484, -73.9857],
+        polygon: [
+          [40.7540, -73.9920],
+          [40.7560, -73.9800],
+          [40.7500, -73.9740],
+          [40.7420, -73.9800],
+          [40.7420, -73.9920],
+          [40.7480, -73.9980]
+        ],
+        baselines: {
+          complaints311: 18.0,
+          trafficSpeed: 18.0,
+          aqi: 55.0,
+          noise: 68.0,
+          transitDelay: 7.2
+        },
+        activeWorkOrders: ["Traffic Light Re-timing #204", "Pedestrian Flow Audit"]
+      },
+      arts_warehouse_district: {
+        name: "Arts & Warehouse Zone",
+        h3Index: "#882a100d27ffff",
+        coords: [40.7380, -74.0080],
+        polygon: [
+          [40.7440, -74.0140],
+          [40.7460, -74.0020],
+          [40.7400, -73.9960],
+          [40.7320, -74.0020],
+          [40.7320, -74.0140],
+          [40.7380, -74.0200]
+        ],
+        baselines: {
+          complaints311: 15.2,
+          trafficSpeed: 28.0,
+          aqi: 38.0,
+          noise: 72.0,
+          transitDelay: 2.1
+        },
+        activeWorkOrders: ["Event Sound Permit Inspection"]
+      },
+      industrial_port: {
+        name: "Industrial Port & Logistics",
+        h3Index: "#882a100d29ffff",
+        coords: [40.7050, -74.0180],
+        polygon: [
+          [40.7110, -74.0240],
+          [40.7130, -74.0120],
+          [40.7070, -74.0060],
+          [40.6990, -74.0120],
+          [40.6990, -74.0240],
+          [40.7050, -74.0300]
+        ],
+        baselines: {
+          complaints311: 5.0,
+          trafficSpeed: 38.0,
+          aqi: 65.0,
+          noise: 58.0,
+          transitDelay: 4.0
+        },
+        activeWorkOrders: ["Freight Rail Crossing Maintenance"]
+      },
+      uptown_heights: {
+        name: "Uptown Residential Heights",
+        h3Index: "#882a100d23ffff",
+        coords: [40.7620, -73.9720],
+        polygon: [
+          [40.7680, -73.9780],
+          [40.7700, -73.9660],
+          [40.7640, -73.9600],
+          [40.7560, -73.9660],
+          [40.7560, -73.9780],
+          [40.7620, -73.9840]
+        ],
+        baselines: {
+          complaints311: 9.0,
+          trafficSpeed: 35.0,
+          aqi: 30.0,
+          noise: 45.0,
+          transitDelay: 1.8
+        },
+        activeWorkOrders: ["Tree Trimming & Park Maintenance"]
+      }
+    };
+
+    // Global Application State
+    let appState = {
+      selectedDistrictId: 'downtown_harbor',
+      simulating: true,
+      simSpeed: 1,
+      timeStep: 0,
+      sensitivityThreshold: 2.0,
+      activeScenario: null,
+      geminiApiKey: '',
+      googleMapsApiKey: '',
+      currentMapLayer: 'carto-dark',
+      selectedModel: 'gemini-3-flash-preview',
+      chartSelectedStream: 'all',
+      districtsData: {},
+      historicalTelemetry: {},
+      anomalyLog: [],
+      speechSynth: window.speechSynthesis || null,
+      map: null,
+      mapTileLayer: null,
+      hexPolygons: {},
+      telemetryChart: null
+    };
+
+    // Initialize Telemetry Buffer Arrays for each district
+    function initDataStructures() {
+      Object.keys(DISTRICTS).forEach(dId => {
+        const base = DISTRICTS[dId].baselines;
+        appState.districtsData[dId] = {
+          current: { ...base },
+          zScores: { complaints311: 0, trafficSpeed: 0, aqi: 0, noise: 0, transitDelay: 0 },
+          isolationScore: 0.1,
+          status: 'NORMAL' // NORMAL, CAUTION, CRITICAL
+        };
+
+        appState.historicalTelemetry[dId] = {
+          timestamps: [],
+          complaints311: [],
+          trafficSpeed: [],
+          aqi: [],
+          noise: [],
+          transitDelay: []
+        };
+
+        // Seed 15 historical points
+        for (let i = 15; i >= 0; i--) {
+          const timeLabel = new Date(Date.now() - i * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          appState.historicalTelemetry[dId].timestamps.push(timeLabel);
+          appState.historicalTelemetry[dId].complaints311.push(base.complaints311 + (Math.random() * 4 - 2));
+          appState.historicalTelemetry[dId].trafficSpeed.push(base.trafficSpeed + (Math.random() * 4 - 2));
+          appState.historicalTelemetry[dId].aqi.push(base.aqi + (Math.random() * 6 - 3));
+          appState.historicalTelemetry[dId].noise.push(base.noise + (Math.random() * 5 - 2.5));
+          appState.historicalTelemetry[dId].transitDelay.push(base.transitDelay + (Math.random() * 2 - 1));
+        }
+      });
+    }
+
+    /* ==========================================================================
+       2. REAL-TIME SIMULATION & STATISTICAL ANOMALY ENGINE
+       ========================================================================== */
+
+    function tickSimulation() {
+      if (!appState.simulating) return;
+
+      appState.timeStep++;
+      const nowStr = new Date().toLocaleTimeString();
+      document.getElementById('clock-display').innerText = nowStr;
+
+      Object.keys(DISTRICTS).forEach(dId => {
+        const base = DISTRICTS[dId].baselines;
+        const current = appState.districtsData[dId].current;
+        const hist = appState.historicalTelemetry[dId];
+
+        // 1. Natural Ambient Noise Fluctuation
+        current.complaints311 = Math.max(0, current.complaints311 + (Math.random() * 1.8 - 0.9));
+        current.trafficSpeed = Math.max(2, current.trafficSpeed + (Math.random() * 2 - 1));
+        current.aqi = Math.max(5, current.aqi + (Math.random() * 2.5 - 1.25));
+        current.noise = Math.max(30, current.noise + (Math.random() * 2 - 1));
+        current.transitDelay = Math.max(0, current.transitDelay + (Math.random() * 1 - 0.5));
+
+        // 2. Scenario Perturbations (If injected into specific target district)
+        if (appState.activeScenario && appState.selectedDistrictId === dId) {
+          applyScenarioEffects(appState.activeScenario, current);
+        }
+
+        // 3. Update History Buffer (Keep last 20 ticks)
+        hist.timestamps.push(nowStr);
+        hist.complaints311.push(current.complaints311);
+        hist.trafficSpeed.push(current.trafficSpeed);
+        hist.aqi.push(current.aqi);
+        hist.noise.push(current.noise);
+        hist.transitDelay.push(current.transitDelay);
+
+        if (hist.timestamps.length > 20) {
+          hist.timestamps.shift();
+          hist.complaints311.shift();
+          hist.trafficSpeed.shift();
+          hist.aqi.shift();
+          hist.noise.shift();
+          hist.transitDelay.shift();
+        }
+
+        // 4. Calculate Z-Scores & Isolation Anomaly Metric
+        computeDistrictAnomalies(dId);
+      });
+
+      // Update UI components
+      updateOverviewMetrics();
+      updateMapHexColors();
+      updateTelemetryChart();
+      updateCorrelationMatrix();
+      updateStreamInspectorTable();
+    }
+
+    function applyScenarioEffects(scenario, current) {
+      switch (scenario) {
+        case 'water_main':
+          current.complaints311 += 4.5; // Water complaint surge
+          current.trafficSpeed = Math.max(3, current.trafficSpeed - 3.2); // Traffic bottleneck
+          break;
+        case 'extreme_heat':
+          current.aqi += 3.8;
+          current.complaints311 += 2.2;
+          current.transitDelay += 0.8;
+          break;
+        case 'noise_transit':
+          current.noise += 4.0;
+          current.transitDelay += 1.5;
+          break;
+        case 'air_quality':
+          current.aqi += 6.5;
+          current.complaints311 += 3.0;
+          break;
+      }
+    }
+
+    function computeDistrictAnomalies(dId) {
+      const dist = appState.districtsData[dId];
+      const hist = appState.historicalTelemetry[dId];
+      const keys = ['complaints311', 'trafficSpeed', 'aqi', 'noise', 'transitDelay'];
+      let maxAbsZ = 0;
+
+      keys.forEach(k => {
+        const arr = hist[k];
+        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+        const stdDev = Math.sqrt(arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / arr.length) || 1;
+        const z = (dist.current[k] - mean) / stdDev;
+        dist.zScores[k] = parseFloat(z.toFixed(2));
+
+        if (Math.abs(z) > maxAbsZ) maxAbsZ = Math.abs(z);
+
+        // Check against alert threshold
+        if (Math.abs(z) >= appState.sensitivityThreshold) {
+          logAnomalyAlert(dId, k, dist.current[k], z);
+        }
+      });
+
+      // Synthetic Isolation Forest Anomaly Score approximation
+      dist.isolationScore = Math.min(1.0, parseFloat((maxAbsZ / 4.5).toFixed(2)));
+
+      // Determine Severity Status
+      if (dist.isolationScore >= 0.65) {
+        dist.status = 'CRITICAL';
+      } else if (dist.isolationScore >= 0.35) {
+        dist.status = 'CAUTION';
+      } else {
+        dist.status = 'NORMAL';
+      }
+    }
+
+    function logAnomalyAlert(dId, metricKey, val, zScore) {
+      const dName = DISTRICTS[dId].name;
+      const metricLabels = {
+        complaints311: '311 Complaint Surge',
+        trafficSpeed: 'Traffic Bottleneck',
+        aqi: 'Air Quality (AQI) Spike',
+        noise: 'Acoustic / Noise Spike',
+        transitDelay: 'Transit GTFS Delay'
+      };
+
+      const keyId = `${dId}-${metricKey}-${Math.floor(Date.now() / 10000)}`;
+      if (appState.anomalyLog.some(a => a.id === keyId)) return;
+
+      const severity = Math.abs(zScore) > 3.0 ? 'CRITICAL' : 'CAUTION';
+      const alertObj = {
+        id: keyId,
+        timestamp: new Date().toLocaleTimeString(),
+        districtName: dName,
+        districtId: dId,
+        metricLabel: metricLabels[metricKey],
+        value: val.toFixed(1),
+        zScore: zScore,
+        severity: severity
+      };
+
+      appState.anomalyLog.unshift(alertObj);
+      if (appState.anomalyLog.length > 25) appState.anomalyLog.pop();
+
+      renderAnomalyLogList();
+    }
+
+    /* ==========================================================================
+       3. CROSS-STREAM PEARSON CORRELATION ENGINE
+       ========================================================================== */
+
+    function computePearsonCorrelation(x, y) {
+      const n = x.length;
+      if (n < 2) return 0;
+      let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, sumXY = 0;
+      for (let i = 0; i < n; i++) {
+        sumX += x[i];
+        sumY += y[i];
+        sumX2 += x[i] * x[i];
+        sumY2 += y[i] * y[i];
+        sumXY += x[i] * y[i];
+      }
+      const num = (n * sumXY) - (sumX * sumY);
+      const den = Math.sqrt(((n * sumX2) - (sumX * sumX)) * ((n * sumY2) - (sumY * sumY)));
+      return den === 0 ? 0 : parseFloat((num / den).toFixed(2));
+    }
+
+    function updateCorrelationMatrix() {
+      const dId = appState.selectedDistrictId;
+      const hist = appState.historicalTelemetry[dId];
+      const keys = ['complaints311', 'trafficSpeed', 'aqi', 'noise', 'transitDelay'];
+      const keyLabels = {
+        complaints311: '311 Surge',
+        trafficSpeed: 'Traffic Speed',
+        aqi: 'Air Quality',
+        noise: 'Noise Level',
+        transitDelay: 'Transit Delay'
+      };
+
+      const tableEl = document.getElementById('correlation-table');
+      if (!tableEl) return;
+
+      let html = `<thead><tr><th class="p-2 border-b border-white/10 text-left text-slate-400">Stream</th>`;
+      keys.forEach(k => {
+        html += `<th class="p-2 border-b border-white/10 text-slate-300 font-bold">${keyLabels[k]}</th>`;
+      });
+      html += `</tr></thead><tbody>`;
+
+      let topCorrelations = [];
+
+      keys.forEach(k1 => {
+        html += `<tr class="border-b border-white/5"><td class="p-2 text-left font-bold text-slate-300">${keyLabels[k1]}</td>`;
+        keys.forEach(k2 => {
+          const r = computePearsonCorrelation(hist[k1], hist[k2]);
+          let bgClr = 'bg-slate-900/50 text-slate-400';
+          if (r > 0.5) bgClr = 'bg-rose-500/30 text-rose-300 font-bold border border-rose-500/40';
+          else if (r < -0.5) bgClr = 'bg-cyan-500/30 text-cyan-300 font-bold border border-cyan-500/40';
+          
+          html += `<td class="p-2 ${bgClr}">${r > 0 ? '+' : ''}${r.toFixed(2)}</td>`;
+
+          if (k1 !== k2 && !topCorrelations.some(c => (c.k1 === k2 && c.k2 === k1))) {
+            topCorrelations.push({ k1, k2, r, label1: keyLabels[k1], label2: keyLabels[k2] });
+          }
+        });
+        html += `</tr>`;
+      });
+      html += `</tbody>`;
+      tableEl.innerHTML = html;
+
+      // Render Top Discoveries Card List
+      topCorrelations.sort((a, b) => Math.abs(b.r) - Math.abs(a.r));
+      const listEl = document.getElementById('top-correlations-list');
+      if (listEl) {
+        listEl.innerHTML = topCorrelations.slice(0, 4).map(c => `
+          <div class="glass-card rounded-xl p-3 border border-white/10 flex items-center justify-between">
+            <div>
+              <div class="text-xs font-bold text-slate-100">${c.label1} <i class="fa-solid fa-arrows-rotate mx-1 text-brand-teal text-[10px]"></i> ${c.label2}</div>
+              <div class="text-[10px] font-mono text-slate-400">Temporal Lead-Lag Window: ~10 mins</div>
+            </div>
+            <div class="text-right">
+              <span class="px-2 py-1 rounded-lg text-xs font-mono font-bold ${Math.abs(c.r) > 0.6 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'bg-slate-800 text-slate-300'}">
+                r = ${c.r > 0 ? '+' : ''}${c.r}
+              </span>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    /* ==========================================================================
+       4. AI NARRATIVE GENERATOR (GEMINI API INTEGRATION + FALLBACK ENGINE)
+       ========================================================================== */
+
+    async function generateAINarrative() {
+      const btn = document.getElementById('btn-generate-ai');
+      const box = document.getElementById('narrative-box');
+      const fullBox = document.getElementById('narrative-full-output');
+      const payloadPreview = document.getElementById('narrative-payload-preview');
+
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin text-xs"></i><span>SYNTHESIZING...</span>`;
+
+      const dId = appState.selectedDistrictId;
+      const district = DISTRICTS[dId];
+      const data = appState.districtsData[dId];
+
+      // Build Context Payload
+      const contextPayload = {
+        neighborhood: district.name,
+        h3Index: district.h3Index,
+        timestamp: new Date().toISOString(),
+        isolationAnomalyScore: data.isolationScore,
+        districtStatus: data.status,
+        currentTelemetry: data.current,
+        zScores: data.zScores,
+        activeWorkOrders: district.activeWorkOrders,
+        activeScenarioInjected: appState.activeScenario || "None (Standard Operating Baseline)"
+      };
+
+      if (payloadPreview) {
+        payloadPreview.innerText = JSON.stringify(contextPayload, null, 2);
+      }
+
+      let narrativeResult = "";
+
+      // Check if Gemini API key is provided
+      if (appState.geminiApiKey && appState.geminiApiKey.trim().length > 10) {
+        try {
+          narrativeResult = await callGeminiAPI(contextPayload);
+        } catch (err) {
+          console.warn("Gemini API call failed, falling back to built-in heuristic engine:", err);
+          narrativeResult = synthesizeHeuristicNarrative(contextPayload);
+        }
+      } else {
+        // Use Built-in Emulated Gemini AI Engine
+        await new Promise(r => setTimeout(r, 800)); // Simulate AI processing delay
+        narrativeResult = synthesizeHeuristicNarrative(contextPayload);
+      }
+
+      // Render Narrative to UI
+      const formattedHTML = formatNarrativeHTML(narrativeResult);
+      box.innerHTML = formattedHTML;
+      if (fullBox) fullBox.innerHTML = formattedHTML;
+
+      document.getElementById('ai-timestamp').innerText = `LAST UPDATED: ${new Date().toLocaleTimeString()}`;
+      document.getElementById('ai-model-tag').innerText = appState.geminiApiKey ? `ENGINE: ${appState.selectedModel}` : `ENGINE: GEMINI EMULATOR ENGINE`;
+
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fa-solid fa-rotate text-xs"></i><span>GENERATE NARRATIVE</span>`;
+    }
+
+    async function callGeminiAPI(payload) {
+      const promptText = `
+SYSTEM INSTRUCTION: You are an expert municipal intelligence AI director explaining complex city sensor telemetry in simple, clear language to citizens and city official leadership.
+
+PAYLOAD CONTEXT:
+${JSON.stringify(payload, null, 2)}
+
+Produce a response strictly adhering to this markdown structure:
+### EXECUTIVE SUMMARY
+[1-2 clear sentences explaining what is happening right now in the neighborhood.]
+
+### ROOT CAUSE & CORRELATION
+[Explain the primary driver of anomalies and how different streams interact, e.g., water main breaks causing traffic drops.]
+
+### OPERATIONAL IMPACT & ACTIONS
+[State citizen impact and action status on active work orders.]
+`;
+
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${appState.selectedModel}:generateContent?key=${appState.geminiApiKey}`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: promptText }] }]
+        })
+      });
+
+      const resData = await response.json();
+      return resData.candidates[0].content.parts[0].text;
+    }
+
+    function synthesizeHeuristicNarrative(p) {
+      const name = p.neighborhood;
+      const status = p.districtStatus;
+
+      if (status === 'CRITICAL') {
+        if (p.zScores.complaints311 > 2.0 && p.zScores.trafficSpeed < -1.5) {
+          return `### EXECUTIVE SUMMARY
+Severe cascading disruption detected in **${name}**. A sudden surge in 311 utility reports is directly linked to localized traffic stagnation.
+
+### ROOT CAUSE & CORRELATION
+A suspected water infrastructure failure on primary thoroughfares has caused 311 complaint volume to spike to **${p.currentTelemetry.complaints311.toFixed(1)} req/hr** (Z-score: +${p.zScores.complaints311}). Consequently, vehicle transit speeds dropped significantly to **${p.currentTelemetry.trafficSpeed.toFixed(1)} mph**.
+
+### OPERATIONAL IMPACT & ACTIONS
+Municipal utility teams (${p.activeWorkOrders[0] || 'Emergency Dispatch'}) have been mobilized for immediate site intervention. Motorists are advised to utilize alternate ring roads.`;
+        } else if (p.zScores.aqi > 2.0) {
+          return `### EXECUTIVE SUMMARY
+Air Quality Warning active in **${name}**. Particulate matter levels have exceeded standard urban safety thresholds.
+
+### ROOT CAUSE & CORRELATION
+Environmental sensors register an AQI peak of **${p.currentTelemetry.aqi.toFixed(1)}** (Z-score: +${p.zScores.aqi}). Correlated telemetry indicates increased industrial freight activity and ambient thermal inversion.
+
+### OPERATIONAL IMPACT & ACTIONS
+Public health advisories issued for sensitive groups. Air quality monitoring units are conducting active sensor audits.`;
+        }
+      }
+
+      return `### EXECUTIVE SUMMARY
+**${name}** is operating under **${status}** conditions with minimal spatial anomaly variance across municipal sensor networks.
+
+### ROOT CAUSE & CORRELATION
+All telemetry streams including 311 calls (${p.currentTelemetry.complaints311.toFixed(1)} req/hr), traffic speeds (${p.currentTelemetry.trafficSpeed.toFixed(1)} mph), and ambient air quality (${p.currentTelemetry.aqi.toFixed(1)} AQI) remain within nominal statistical bounds.
+
+### OPERATIONAL IMPACT & ACTIONS
+Routine city maintenance operations are underway (${p.activeWorkOrders.join(', ') || 'Standard Patrols'}). No active public advisories required.`;
+    }
+
+    function formatNarrativeHTML(text) {
+      return text
+        .replace(/### EXECUTIVE SUMMARY/g, '<h4 class="text-brand-teal font-bold text-xs uppercase tracking-wider mt-1 mb-0.5"><i class="fa-solid fa-bullhorn mr-1.5"></i>Executive Summary</h4>')
+        .replace(/### ROOT CAUSE & CORRELATION/g, '<h4 class="text-brand-amber font-bold text-xs uppercase tracking-wider mt-2.5 mb-0.5"><i class="fa-solid fa-diagram-project mr-1.5"></i>Root Cause & Cross-Stream Correlations</h4>')
+        .replace(/### OPERATIONAL IMPACT & ACTIONS/g, '<h4 class="text-brand-emerald font-bold text-xs uppercase tracking-wider mt-2.5 mb-0.5"><i class="fa-solid fa-truck-medical mr-1.5"></i>Operational Impact & Action Items</h4>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong class="text-slate-100 font-semibold">$1</strong>');
+    }
+
+    /* Speech Audio Synthesis */
+    function speakNarrative() {
+      if (!appState.speechSynth) {
+        alert("Web Speech API is not supported in this browser.");
+        return;
+      }
+
+      const box = document.getElementById('narrative-box');
+      if (!box) return;
+
+      const cleanText = box.innerText;
+      if (appState.speechSynth.speaking) {
+        appState.speechSynth.cancel();
+        document.getElementById('btn-speak').classList.remove('bg-brand-emerald', 'text-slate-950');
+        return;
+      }
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+
+      utterance.onstart = () => {
+        document.getElementById('btn-speak').classList.add('bg-brand-emerald', 'text-slate-950');
+      };
+
+      utterance.onend = () => {
+        document.getElementById('btn-speak').classList.remove('bg-brand-emerald', 'text-slate-950');
+      };
+
+      appState.speechSynth.speak(utterance);
+    }
+
+    /* ==========================================================================
+       5. USER INTERACTION, UI RENDERING & MAP INITIALIZATION
+       ========================================================================== */
+
+    function initMap() {
+      // Centered on Downtown Harbor District
+      appState.map = L.map('spatial-map', {
+        zoomControl: false,
+        attributionControl: false
+      }).setView([40.7250, -73.9980], 13);
+
+      // Default Dark Matter Map Tiles
+      appState.mapTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19
+      }).addTo(appState.map);
+
+      // Render Hexagonal District Polygons
+      Object.keys(DISTRICTS).forEach(dId => {
+        const dist = DISTRICTS[dId];
+        const poly = L.polygon(dist.polygon, {
+          color: '#00f2fe',
+          weight: 2,
+          fillColor: '#00f5a0',
+          fillOpacity: 0.35,
+          className: 'hex-poly'
+        }).addTo(appState.map);
+
+        poly.on('click', () => {
+          changeSelectedDistrict(dId);
+        });
+
+        poly.bindTooltip(`<b>${dist.name}</b><br>H3: ${dist.h3Index}`, {
+          permanent: false,
+          direction: 'top',
+          className: 'glass-card text-xs text-slate-100 font-mono border-white/10'
+        });
+
+        appState.hexPolygons[dId] = poly;
+      });
+    }
+
+    function changeMapLayer(layerType) {
+      if (!appState.map) return;
+      appState.currentMapLayer = layerType;
+
+      if (appState.mapTileLayer) {
+        appState.map.removeLayer(appState.mapTileLayer);
+      }
+
+      const key = appState.googleMapsApiKey ? `&key=${appState.googleMapsApiKey}` : '';
+
+      switch (layerType) {
+        case 'gmaps-roadmap':
+          appState.mapTileLayer = L.tileLayer(`https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}${key}`, { maxZoom: 20 });
+          break;
+        case 'gmaps-satellite':
+          appState.mapTileLayer = L.tileLayer(`https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}${key}`, { maxZoom: 20 });
+          break;
+        case 'gmaps-hybrid':
+          appState.mapTileLayer = L.tileLayer(`https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}${key}`, { maxZoom: 20 });
+          break;
+        case 'gmaps-terrain':
+          appState.mapTileLayer = L.tileLayer(`https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}${key}`, { maxZoom: 20 });
+          break;
+        case 'carto-dark':
+        default:
+          appState.mapTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
+          break;
+      }
+
+      appState.mapTileLayer.addTo(appState.map);
+    }
+
+    function updateMapHexColors() {
+      Object.keys(DISTRICTS).forEach(dId => {
+        const poly = appState.hexPolygons[dId];
+        if (!poly) return;
+
+        const status = appState.districtsData[dId].status;
+        const isSelected = dId === appState.selectedDistrictId;
+
+        let strokeClr = isSelected ? '#00f2fe' : 'rgba(255,255,255,0.2)';
+        let fillClr = '#00f5a0'; // Normal
+
+        if (status === 'CAUTION') fillClr = '#ffb703';
+        if (status === 'CRITICAL') fillClr = '#f72585';
+
+        poly.setStyle({
+          color: strokeClr,
+          weight: isSelected ? 3 : 1.5,
+          fillColor: fillClr,
+          fillOpacity: isSelected ? 0.6 : 0.35
+        });
+      });
+    }
+
+    function initTelemetryChart() {
+      if (typeof Chart === 'undefined') {
+        console.warn('Chart.js library is not ready yet. Retrying chart initialization in 300ms...');
+        setTimeout(initTelemetryChart, 300);
+        return;
+      }
+
+      const canvas = document.getElementById('telemetryChart');
+      if (!canvas) return;
+
+      const ctx = canvas.getContext('2d');
+      appState.telemetryChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: '311 Complaints',
+              borderColor: '#00f2fe',
+              backgroundColor: 'rgba(0, 242, 254, 0.1)',
+              data: [],
+              tension: 0.3,
+              fill: true
+            },
+            {
+              label: 'Traffic Speed (mph)',
+              borderColor: '#ffb703',
+              backgroundColor: 'transparent',
+              data: [],
+              tension: 0.3
+            },
+            {
+              label: 'AQI Index',
+              borderColor: '#00f5a0',
+              backgroundColor: 'transparent',
+              data: [],
+              tension: 0.3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 300 },
+          plugins: {
+            legend: {
+              labels: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 10 } }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#64748b', font: { size: 9 } }
+            },
+            y: {
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#64748b', font: { size: 9 } }
+            }
+          }
+        }
+      });
+    }
+
+    function updateTelemetryChart() {
+      if (!appState.telemetryChart) return;
+      const dId = appState.selectedDistrictId;
+      const hist = appState.historicalTelemetry[dId];
+
+      appState.telemetryChart.data.labels = hist.timestamps;
+      appState.telemetryChart.data.datasets[0].data = hist.complaints311;
+      appState.telemetryChart.data.datasets[1].data = hist.trafficSpeed;
+    
